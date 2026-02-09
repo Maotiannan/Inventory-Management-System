@@ -1,29 +1,41 @@
-# 进销存系统（ZNAS）
+﻿# 进销存系统（ZNAS）
 
-基于 `FastAPI + PostgreSQL(JSONB) + Vue3 + Naive UI + Docker Compose` 的 NAS 进销存系统。
+基于 `FastAPI + PostgreSQL + Vue3 + Naive UI + Docker Compose` 的 NAS 生产部署版进销存系统。
 
-- 前端：`http://<NAS_IP>:<FRONTEND_PORT>`（默认 `8080`，可在 `.env` 中设置 `FRONTEND_PORT=18080`）
+- 前端：`http://<NAS_IP>:<FRONTEND_PORT>`（默认 `8080`，可在 `.env` 中配置）
 - 后端：`http://<NAS_IP>:8000`
 - OpenAPI：`http://<NAS_IP>:8000/docs`
 
-## 一、当前生产特性
+## 1. 当前版本能力
 
-- 纯镜像运行：后端/前端代码完全构建进镜像，运行时不依赖源码挂载。
-- 持久化数据：数据库、图片、运维数据均使用 Docker Volume。
-- 健康检查：`postgres / backend / frontend` 均带 healthcheck。
-- 多表格与动态字段：同库多表，每表字段可独立配置。
-- API 集成：JWT + API Key。
-- 审计日志：记录账号或 API Key 调用来源。
-- 系统运维（管理员）：仓库配置、检查更新、一键更新、精确回滚、Tailscale 配置。
+- 生产模式镜像部署（无源码热重载）
+- 数据持久化：`db_data`、`images_data`、`ops_data`、`ts_state_data`
+- 多表格、多字段配置（同库不同表各自字段）
+- 账号密码登录 + API Key
+- 人类可读操作日志（区分账号与 API Key）
+- 系统运维（管理员）：
+  - 仓库配置
+  - 检查更新
+  - 一键更新并重启
+  - 精确回滚（最近版本下拉）
+  - 滚回最新版（一键回到 `origin/<branch>`）
+  - Tailscale 配置
 
-## 二、部署步骤（NAS）
+## 2. 首次部署（NAS）
 
-### 1. 准备环境
+### 2.1 准备
 
-- NAS 已安装 Docker 与 Docker Compose v2。
-- 项目目录例如：`/volume1/docker/znas`。
+- NAS 已安装 Docker + Docker Compose v2
+- 项目目录示例：`/tmp/zfsv3/nvme11/.../data/docker/ZNAS`
 
-### 2. 配置环境变量
+### 2.2 拉取代码
+
+```bash
+git clone https://github.com/Maotiannan/Inventory-Management-System.git ZNAS
+cd ZNAS
+```
+
+### 2.3 环境变量
 
 ```bash
 cp .env.production.example .env
@@ -32,141 +44,165 @@ cp .env.production.example .env
 编辑 `.env`，至少修改：
 
 ```env
-POSTGRES_PASSWORD=强密码
-JWT_SECRET_KEY=高熵随机字符串
-ADMIN_PASSWORD=强密码
-REPO_URL=https://github.com/<你的账号>/<仓库>.git
+POSTGRES_PASSWORD=<强密码>
+JWT_SECRET_KEY=<长随机串>
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<强密码>
+FRONTEND_PORT=18080
+REPO_URL=https://github.com/Maotiannan/Inventory-Management-System.git
+UPDATE_BRANCH=main
 ```
 
-### 3. 启动
+### 2.4 启动
 
 ```bash
-docker compose up -d --build
+COMPOSE_PROJECT_NAME=znas docker compose up -d --build
 ```
 
-### 4. 检查
+### 2.5 验证
 
 ```bash
-docker compose ps
-docker compose logs -f backend
+COMPOSE_PROJECT_NAME=znas docker compose ps
+docker logs --tail=100 znas-backend
 ```
 
-## 三、为什么会提示“未配置 origin 远程仓库”
+## 3. 日常维护（你问的“新设备怎么维护”）
 
-这是因为系统运维的“检查更新/一键更新/回滚”需要 Git 远程仓库来源。
+答案是：**是的，推荐这样做**。
 
-处理方式有两种：
+标准流程：
 
-1. 网页方式（推荐）
+1. 在新电脑 clone 仓库
+2. 本地改代码并自测
+3. push 到 GitHub `main`
+4. 在 NAS 网页端点 `一键更新并重启`
+5. 等待后端和前端健康后刷新页面
 
-- 进入：`系统设置 -> 系统运维 -> 仓库配置`
-- 填写 `REPO_URL`（例如 GitHub 仓库地址）和分支（默认 `main`）
-- 点击“保存并初始化仓库”
-
-2. 命令行方式
+新设备最小命令：
 
 ```bash
-git remote add origin https://github.com/<you>/<repo>.git
-git fetch origin
+git clone https://github.com/Maotiannan/Inventory-Management-System.git
+cd Inventory-Management-System
+# 修改代码后
+# git add ...
+# git commit -m "feat/fix: ..."
+git push origin main
 ```
 
-## 四、手机上传图片失败的修复说明
+## 4. 网页端更新与回滚
 
-已修复两类常见原因：
+入口：`设置 -> 系统运维`
 
-- Nginx 上传体积限制：已将 `client_max_body_size` 提升到 `30m`。
-- iPhone 常见 `HEIC/HEIF`：后端已增加该格式解析支持（`pillow-heif`）。
+### 4.1 项目更新
 
-## 五、国内源优化
+- `检查更新`：显示当前分支、当前版本、远端版本、状态
+- `一键更新并重启`：后台执行 `scripts/nas_update.sh`
 
-已切换可切换的国内源：
+### 4.2 精确回滚
 
-- Python：`PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`
-- apt：`mirrors.aliyun.com`
-- npm：`https://registry.npmmirror.com`
-- 基础镜像：已使用国内镜像前缀（`swr.cn-north-4...`）
+- 下拉框可选最近版本（远端最新版 / 当前版本 / Tags / 最近提交）
+- 选择后点 `执行回滚`
+- 或点 `滚回最新版` 直接回到远端分支最新提交
 
-## 六、生产编排说明
+对应脚本：
 
-`docker-compose.yml` 已改为生产运行模式：
+- `scripts/nas_update.sh`
+- `scripts/nas_rollback.sh`
 
-- 去除开发期源码挂载和热重载。
-- 通过 `APP_VERSION`、`BACKEND_IMAGE`、`FRONTEND_IMAGE` 管理镜像版本。
-- 使用命名卷：
-  - `db_data`
-  - `images_data`
-  - `ops_data`
-  - `ts_state_data`
+运维日志：
 
-## 七、版本管理（管理员）
+- `ops_data/update_web.log`
+- `ops_data/rollback_web.log`
 
-入口：`系统设置 -> 系统运维`
+## 5. 若网页更新失败，命令行兜底
 
-支持：
+### 5.1 手动更新
 
-- 仓库配置（REPO_URL/分支）
-- 检查更新
-- 一键更新并重启
-- 查看 tag 和提交历史
-- 输入 tag/commit 执行精确回滚
+```bash
+cd /tmp/zfsv3/nvme11/.../data/docker/ZNAS
+git fetch --all --prune
+git reset --hard origin/main
+COMPOSE_PROJECT_NAME=znas sudo -E docker compose up -d --build backend frontend
+```
 
-说明：回滚与更新执行日志写入 `ops_data` 内日志文件（`update_web.log` / `rollback_web.log`）。
+### 5.2 手动回滚
 
-## 八、API 能力概览
+```bash
+cd /tmp/zfsv3/nvme11/.../data/docker/ZNAS
+bash scripts/nas_rollback.sh <tag-or-commit>
+```
+
+### 5.3 回到最新版
+
+```bash
+cd /tmp/zfsv3/nvme11/.../data/docker/ZNAS
+bash scripts/nas_rollback.sh origin/main
+```
+
+## 6. Git 网络不稳定（TLS/超时）处理
+
+如果 NAS `git fetch` 偶发失败：
+
+```bash
+git config --local http.version HTTP/1.1
+git remote set-url origin https://github.com/Maotiannan/Inventory-Management-System.git
+git fetch --all --prune
+```
+
+如果网页端运维仓库源错误，修复：
+
+```bash
+sudo docker exec znas-backend sh -lc 'git -C /data/ops/repo remote set-url origin https://github.com/Maotiannan/Inventory-Management-System.git; git -C /data/ops/repo config http.version HTTP/1.1; printf "%s\n" "{""repo_url"":""https://github.com/Maotiannan/Inventory-Management-System.git"",""branch"":""main""}" > /data/ops/repo_config.json'
+COMPOSE_PROJECT_NAME=znas sudo -E docker compose restart backend
+```
+
+## 7. API 概览
 
 鉴权方式：
 
 - `Authorization: Bearer <token>`
 - `X-API-Key: <api_key>`
 
-系统关键接口：
+核心接口：
 
 - 认证：`POST /auth/login`、`GET /auth/validate`
-- 账号：`GET/POST/DELETE /users`
+- 用户：`GET/POST/DELETE /users`
 - 表格：`GET/POST/PATCH/DELETE /tables`
-- 字段：`GET/PUT/POST /config/schema`
 - 物料：`GET/POST/PATCH/DELETE /items`
-- 库存：`POST /stock/in`、`POST /stock/out`
+- 出入库：`POST /stock/in`、`POST /stock/out`
 - 上传：`POST /upload`
-- 日志与 API Key：`/integration/*`
-- 系统运维（管理员）：`/system/*`
+- 系统运维（管理员）：
+  - `GET /system/update/status`
+  - `POST /system/update/apply`
+  - `GET /system/version/state`
+  - `GET /system/version/history`
+  - `GET /system/version/tags`
+  - `POST /system/version/rollback`
+  - `POST /system/version/rollback/latest`
 
-## 九、模块化更新规范
+## 8. 模块化开发规范
 
-后续功能开发请遵循：
+模块开发请遵循：`docs/MODULE_UPDATE_SPEC.md`
 
-- 文档：`docs/MODULE_UPDATE_SPEC.md`
+重点：
 
-该规范包含：模块边界、API 约束、数据迁移、发布与回滚流程、准入检查清单。
+- 每个模块必须有清晰 API
+- 迁移脚本可回滚
+- 变更可灰度/可回退
+- 发布前有最小回归检查
 
-## 十、常用命令
-
-启动：
-
-```bash
-docker compose up -d
-```
-
-重建：
-
-```bash
-docker compose up -d --build
-```
-
-查看状态：
+## 9. 常用命令速查
 
 ```bash
-docker compose ps
-```
+# 启动
+COMPOSE_PROJECT_NAME=znas docker compose up -d
 
-手动更新：
+# 重建
+COMPOSE_PROJECT_NAME=znas docker compose up -d --build
 
-```bash
-bash scripts/nas_update.sh
-```
+# 状态
+COMPOSE_PROJECT_NAME=znas docker compose ps
 
-手动回滚：
-
-```bash
-bash scripts/nas_rollback.sh <tag-or-commit>
+# 后端日志
+docker logs -f znas-backend
 ```
