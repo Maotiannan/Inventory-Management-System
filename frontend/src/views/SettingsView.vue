@@ -161,9 +161,10 @@
           <n-h4>项目更新</n-h4>
           <n-space vertical>
             <n-text>当前分支: {{ updateStatus.current_branch || versionState.branch || "-" }}</n-text>
-            <n-text>当前版本: {{ updateStatus.current_commit || versionState.commit || "-" }}</n-text>
+            <n-text>当前版本: {{ updateStatus.current_commit || versionState.commit || versionState.short_commit || "-" }}</n-text>
             <n-text>远端版本: {{ updateStatus.remote_commit || "-" }}</n-text>
             <n-text>状态: {{ updateStatus.message || "-" }}</n-text>
+            <n-text v-if="versionState.message" depth="3">版本状态: {{ versionState.message }}</n-text>
           </n-space>
           <n-space>
             <n-button :loading="checkingUpdate" @click="checkUpdateStatus">检查更新</n-button>
@@ -335,6 +336,7 @@ const versionState = ref({
   short_commit: "",
   tag: "",
   checked_at: "",
+  message: "",
 });
 
 const versionTags = ref([]);
@@ -701,7 +703,11 @@ async function loadVersionState(silent = false) {
   try {
     const { data } = await http.get("/system/version/state", { timeout: 20000 });
     versionState.value = data;
-    return true;
+    const hasVersion = Boolean(data?.commit || data?.short_commit);
+    if (!hasVersion && !silent) {
+      message.warning(data?.message || "已连接，但暂未获取到版本号");
+    }
+    return hasVersion;
   } catch (error) {
     if (!silent) {
       message.error(error?.response?.data?.detail || "Failed to load version state");
@@ -757,12 +763,13 @@ async function refreshVersionMeta() {
       loadVersionHistory(true),
     ]);
     const okCount = results.filter(Boolean).length;
-    if (okCount === results.length) {
+    const hasVersionIdentity = Boolean(versionState.value?.commit || versionState.value?.short_commit);
+    if (okCount === results.length && hasVersionIdentity) {
       message.success("版本信息已刷新");
     } else if (okCount > 0) {
-      message.warning("部分版本信息刷新成功，请稍后重试失败项");
+      message.warning(versionState.value?.message || "部分版本信息刷新成功，请稍后重试失败项");
     } else {
-      message.error("刷新版本信息失败，请检查网络或仓库配置");
+      message.error(versionState.value?.message || "刷新版本信息失败，请检查网络或仓库配置");
     }
   } finally {
     refreshingVersionMeta.value = false;

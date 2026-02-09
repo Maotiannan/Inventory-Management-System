@@ -240,6 +240,31 @@ def _repo_is_initialized(root: Path) -> bool:
     return (root / ".git").exists()
 
 
+def _ensure_git_safe_directory(repo_root: Path) -> None:
+    # Avoid "detected dubious ownership" when repo files are mounted/copied by different users.
+    _run_cmd(["git", "config", "--global", "--add", "safe.directory", str(repo_root)], timeout_sec=5)
+
+
+def _resolve_remote_commit(repo_root: Path, branch: str, timeout_sec: int = 20) -> tuple[str, str | None]:
+    rc, out, err = _run_cmd(["git", "-C", str(repo_root), "rev-parse", f"origin/{branch}"], timeout_sec=8)
+    if rc == 0 and out:
+        return out.strip(), None
+
+    # Fallback for unstable networks: query remote head without full fetch.
+    rc_ls, out_ls, err_ls = _run_cmd(
+        ["git", "-C", str(repo_root), "ls-remote", "--heads", "origin", branch],
+        timeout_sec=timeout_sec,
+    )
+    if rc_ls != 0 or not out_ls.strip():
+        return "", (err or err_ls or "failed to resolve remote commit")
+
+    first = out_ls.splitlines()[0].strip()
+    commit = first.split()[0].strip() if first else ""
+    if not commit:
+        return "", "failed to parse remote commit"
+    return commit, None
+
+
 def _git_log_rows(repo_root: str, limit: int) -> list[dict[str, str]]:
     rc, out, err = _run_cmd(
         [
@@ -438,10 +463,12 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
             "message": "Repository is not initialized",
         }
 
-    rc1, current_commit, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"], timeout_sec=6)
+    _ensure_git_safe_directory(root)
+
+    rc1, current_commit, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"], timeout_sec=8)
     rc2, current_branch, err2 = _run_cmd(
         ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
-        timeout_sec=6,
+        timeout_sec=8,
     )
     if rc1 != 0 or rc2 != 0:
         return {
@@ -452,9 +479,22 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
 
     rc_fetch, _, err_fetch = _run_cmd(
         ["git", "-C", str(root), "fetch", "origin", branch],
-        timeout_sec=12,
+        timeout_sec=35,
     )
     if rc_fetch != 0:
+        remote_commit, resolve_err = _resolve_remote_commit(root, branch, timeout_sec=25)
+        if remote_commit:
+            has_update = current_commit != remote_commit
+            return {
+                "enabled": True,
+                "ok": True,
+                "repo_url": config["repo_url"],
+                "current_branch": current_branch,
+                "current_commit": current_commit,
+                "remote_commit": remote_commit,
+                "has_update": has_update,
+                "message": f"Remote fetch failed, fallback to ls-remote: {err_fetch}",
+            }
         return {
             "enabled": True,
             "ok": False,
@@ -463,20 +503,17 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
             "current_commit": current_commit,
             "remote_commit": "",
             "has_update": False,
-            "message": f"Remote fetch failed: {err_fetch}",
+            "message": f"Remote fetch failed: {err_fetch or resolve_err}",
         }
 
-    rc3, remote_commit, err3 = _run_cmd(
-        ["git", "-C", str(root), "rev-parse", f"origin/{branch}"],
-        timeout_sec=6,
-    )
-    if rc3 != 0:
+    remote_commit, resolve_err = _resolve_remote_commit(root, branch, timeout_sec=12)
+    if not remote_commit:
         return {
             "enabled": True,
             "ok": False,
             "current_branch": current_branch,
             "current_commit": current_commit,
-            "message": f"Remote status failed: {err3}",
+            "message": f"Remote status failed: {resolve_err}",
         }
 
     has_update = current_commit != remote_commit
@@ -548,6 +585,8 @@ async def get_version_state(_: User = Depends(require_admin)) -> dict[str, Any]:
             "initialized": False,
         }
 
+    _ensure_git_safe_directory(root)
+
     rc1, branch, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"])
     rc2, commit, err2 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"])
     rc3, short_commit, _ = _run_cmd(["git", "-C", str(root), "rev-parse", "--short", "HEAD"])
@@ -581,6 +620,7 @@ async def get_version_history(limit: int = 30, _: User = Depends(require_admin))
     root = _repo_path()
     if not _repo_is_initialized(root):
         return {"items": []}
+    _ensure_git_safe_directory(root)
     return {"items": _git_log_rows(str(root), safe_limit)}
 
 
@@ -590,6 +630,7 @@ async def get_version_tags(limit: int = 50, _: User = Depends(require_admin)) ->
     root = _repo_path()
     if not _repo_is_initialized(root):
         return {"items": []}
+    _ensure_git_safe_directory(root)
     rc, out, err = _run_cmd(["git", "-C", str(root), "tag", "--sort=-creatordate"])
     if rc != 0:
         return {"items": [], "message": err or "Failed to read tags"}
