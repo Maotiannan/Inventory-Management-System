@@ -48,7 +48,7 @@ export const useAuthStore = defineStore("auth", {
 
       setAuthToken(this.token);
       try {
-        const { data } = await http.get("/auth/validate");
+        const { data } = await http.get("/auth/validate", { timeout: 5000 });
         this.user = data;
       } catch (_) {
         this.clearSession();

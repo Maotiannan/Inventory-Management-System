@@ -651,16 +651,29 @@ async function saveRepoConfig(initialize) {
   }
 }
 
-async function checkUpdateStatus() {
-  checkingUpdate.value = true;
+async function checkUpdateStatus(silent = false) {
+  if (!silent) {
+    checkingUpdate.value = true;
+  }
   try {
-    const { data } = await http.get("/system/update/status");
+    const { data } = await http.get("/system/update/status", { timeout: 12000 });
     updateStatus.value = { ...updateStatus.value, ...data };
-    message.info(data.message || "更新状态已刷新");
+    if (!silent) {
+      message.info(data.message || "Update status refreshed");
+    }
   } catch (error) {
-    message.error(error?.response?.data?.detail || "检查更新失败");
+    updateStatus.value = {
+      ...updateStatus.value,
+      ok: false,
+      message: error?.response?.data?.detail || "Update check failed",
+    };
+    if (!silent) {
+      message.error(error?.response?.data?.detail || "Update check failed");
+    }
   } finally {
-    checkingUpdate.value = false;
+    if (!silent) {
+      checkingUpdate.value = false;
+    }
   }
 }
 
@@ -677,39 +690,51 @@ async function applyUpdateNow() {
   }
 }
 
-async function loadVersionState() {
+async function loadVersionState(silent = false) {
   if (!isAdmin.value) {
     return;
   }
   try {
-    const { data } = await http.get("/system/version/state");
+    const { data } = await http.get("/system/version/state", { timeout: 12000 });
     versionState.value = data;
   } catch (error) {
-    message.error(error?.response?.data?.detail || "读取版本状态失败");
+    if (!silent) {
+      message.error(error?.response?.data?.detail || "Failed to load version state");
+    }
   }
 }
 
-async function loadVersionTags() {
+async function loadVersionTags(silent = false) {
   if (!isAdmin.value) {
     return;
   }
   try {
-    const { data } = await http.get("/system/version/tags", { params: { limit: 100 } });
+    const { data } = await http.get("/system/version/tags", {
+      params: { limit: 100 },
+      timeout: 12000,
+    });
     versionTags.value = Array.isArray(data?.items) ? data.items.map((tag) => ({ tag })) : [];
   } catch (error) {
-    message.error(error?.response?.data?.detail || "读取标签失败");
+    if (!silent) {
+      message.error(error?.response?.data?.detail || "Failed to load tags");
+    }
   }
 }
 
-async function loadVersionHistory() {
+async function loadVersionHistory(silent = false) {
   if (!isAdmin.value) {
     return;
   }
   try {
-    const { data } = await http.get("/system/version/history", { params: { limit: 50 } });
+    const { data } = await http.get("/system/version/history", {
+      params: { limit: 50 },
+      timeout: 12000,
+    });
     versionHistory.value = Array.isArray(data?.items) ? data.items : [];
   } catch (error) {
-    message.error(error?.response?.data?.detail || "读取提交历史失败");
+    if (!silent) {
+      message.error(error?.response?.data?.detail || "Failed to load commit history");
+    }
   }
 }
 
@@ -936,19 +961,18 @@ onMounted(async () => {
     ]);
 
     if (isAdmin.value) {
-      await Promise.all([
-        loadRepoConfig(),
-        checkUpdateStatus(),
-        loadVersionState(),
-        loadVersionTags(),
-        loadVersionHistory(),
-        loadTailscaleConfig(),
+      await Promise.all([loadRepoConfig(), loadTailscaleConfig()]);
+      await Promise.allSettled([
+        checkUpdateStatus(true),
+        loadVersionState(true),
+        loadVersionTags(true),
+        loadVersionHistory(true),
       ]);
     }
 
     await switchEditingTable(tablesStore.activeTableId || tablesStore.tables[0]?.id || "");
   } catch (error) {
-    message.error(error?.response?.data?.detail || "加载设置失败");
+    message.error(error?.response?.data?.detail || "Failed to load settings");
   } finally {
     loading.value = false;
   }

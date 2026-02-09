@@ -140,20 +140,30 @@ def _save_repo_config(repo_url: str, branch: str) -> None:
     _save_json(_repo_config_path(), {"repo_url": repo_url, "branch": branch})
 
 
-def _run_cmd(cmd: list[str], cwd: str | None = None, env: dict[str, str] | None = None) -> tuple[int, str, str]:
+def _run_cmd(
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout_sec: int | float | None = 20,
+) -> tuple[int, str, str]:
     process_env = os.environ.copy()
     if env:
         process_env.update({k: str(v) for k, v in env.items()})
-    proc = subprocess.run(
-        cmd,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="ignore",
-        env=process_env,
-    )
-    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            env=process_env,
+            timeout=timeout_sec,
+        )
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    except subprocess.TimeoutExpired:
+        joined_cmd = " ".join(cmd)
+        return 124, "", f"command timed out after {timeout_sec}s: {joined_cmd}"
 
 
 def _compose_prefix() -> list[str]:
@@ -362,8 +372,11 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
     root = _ensure_repo_initialized(config["repo_url"], config["branch"])
     branch = config["branch"]
 
-    rc1, current_commit, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"])
-    rc2, current_branch, err2 = _run_cmd(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"])
+    rc1, current_commit, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"], timeout_sec=6)
+    rc2, current_branch, err2 = _run_cmd(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+        timeout_sec=6,
+    )
     if rc1 != 0 or rc2 != 0:
         return {
             "enabled": True,
@@ -371,8 +384,26 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
             "message": f"Git status failed: {err1 or err2}",
         }
 
-    _run_cmd(["git", "-C", str(root), "fetch", "origin", branch])
-    rc3, remote_commit, err3 = _run_cmd(["git", "-C", str(root), "rev-parse", f"origin/{branch}"])
+    rc_fetch, _, err_fetch = _run_cmd(
+        ["git", "-C", str(root), "fetch", "origin", branch],
+        timeout_sec=12,
+    )
+    if rc_fetch != 0:
+        return {
+            "enabled": True,
+            "ok": False,
+            "repo_url": config["repo_url"],
+            "current_branch": current_branch,
+            "current_commit": current_commit,
+            "remote_commit": "",
+            "has_update": False,
+            "message": f"Remote fetch failed: {err_fetch}",
+        }
+
+    rc3, remote_commit, err3 = _run_cmd(
+        ["git", "-C", str(root), "rev-parse", f"origin/{branch}"],
+        timeout_sec=6,
+    )
     if rc3 != 0:
         return {
             "enabled": True,
