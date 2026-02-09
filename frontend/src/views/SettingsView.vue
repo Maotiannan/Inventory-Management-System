@@ -175,7 +175,7 @@
           <n-space>
             <n-input v-model:value="rollbackRef" placeholder="输入 tag/commit，例如 v1.0.0 或 commit SHA" />
             <n-button type="error" :loading="rollingBack" @click="rollbackToRef">执行回滚</n-button>
-            <n-button @click="refreshVersionMeta">刷新版本信息</n-button>
+            <n-button :loading="refreshingVersionMeta" @click="refreshVersionMeta">刷新版本信息</n-button>
           </n-space>
 
           <n-grid cols="1 s:2" responsive="screen" :x-gap="12">
@@ -285,6 +285,7 @@ const checkingUpdate = ref(false);
 const applyingUpdate = ref(false);
 const savingRepo = ref(false);
 const rollingBack = ref(false);
+const refreshingVersionMeta = ref(false);
 
 const newTableName = ref("");
 const editingTableId = ref("");
@@ -656,19 +657,22 @@ async function checkUpdateStatus(silent = false) {
     checkingUpdate.value = true;
   }
   try {
-    const { data } = await http.get("/system/update/status", { timeout: 12000 });
+    const { data } = await http.get("/system/update/status", { timeout: 20000 });
     updateStatus.value = { ...updateStatus.value, ...data };
     if (!silent) {
       message.info(data.message || "Update status refreshed");
     }
   } catch (error) {
+    const detail =
+      error?.response?.data?.detail ||
+      (error?.code === "ECONNABORTED" ? "请求超时，请稍后重试" : "Update check failed");
     updateStatus.value = {
       ...updateStatus.value,
       ok: false,
-      message: error?.response?.data?.detail || "Update check failed",
+      message: detail,
     };
     if (!silent) {
-      message.error(error?.response?.data?.detail || "Update check failed");
+      message.error(detail);
     }
   } finally {
     if (!silent) {
@@ -692,54 +696,77 @@ async function applyUpdateNow() {
 
 async function loadVersionState(silent = false) {
   if (!isAdmin.value) {
-    return;
+    return false;
   }
   try {
-    const { data } = await http.get("/system/version/state", { timeout: 12000 });
+    const { data } = await http.get("/system/version/state", { timeout: 20000 });
     versionState.value = data;
+    return true;
   } catch (error) {
     if (!silent) {
       message.error(error?.response?.data?.detail || "Failed to load version state");
     }
+    return false;
   }
 }
 
 async function loadVersionTags(silent = false) {
   if (!isAdmin.value) {
-    return;
+    return false;
   }
   try {
     const { data } = await http.get("/system/version/tags", {
       params: { limit: 100 },
-      timeout: 12000,
+      timeout: 20000,
     });
     versionTags.value = Array.isArray(data?.items) ? data.items.map((tag) => ({ tag })) : [];
+    return true;
   } catch (error) {
     if (!silent) {
       message.error(error?.response?.data?.detail || "Failed to load tags");
     }
+    return false;
   }
 }
 
 async function loadVersionHistory(silent = false) {
   if (!isAdmin.value) {
-    return;
+    return false;
   }
   try {
     const { data } = await http.get("/system/version/history", {
       params: { limit: 50 },
-      timeout: 12000,
+      timeout: 20000,
     });
     versionHistory.value = Array.isArray(data?.items) ? data.items : [];
+    return true;
   } catch (error) {
     if (!silent) {
       message.error(error?.response?.data?.detail || "Failed to load commit history");
     }
+    return false;
   }
 }
 
 async function refreshVersionMeta() {
-  await Promise.all([loadVersionState(), loadVersionTags(), loadVersionHistory()]);
+  refreshingVersionMeta.value = true;
+  try {
+    const results = await Promise.all([
+      loadVersionState(true),
+      loadVersionTags(true),
+      loadVersionHistory(true),
+    ]);
+    const okCount = results.filter(Boolean).length;
+    if (okCount === results.length) {
+      message.success("版本信息已刷新");
+    } else if (okCount > 0) {
+      message.warning("部分版本信息刷新成功，请稍后重试失败项");
+    } else {
+      message.error("刷新版本信息失败，请检查网络或仓库配置");
+    }
+  } finally {
+    refreshingVersionMeta.value = false;
+  }
 }
 
 function pickRollbackRef(value) {

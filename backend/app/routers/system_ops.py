@@ -236,6 +236,10 @@ def _ensure_repo_initialized(repo_url: str, branch: str) -> Path:
     return root
 
 
+def _repo_is_initialized(root: Path) -> bool:
+    return (root / ".git").exists()
+
+
 def _git_log_rows(repo_root: str, limit: int) -> list[dict[str, str]]:
     rc, out, err = _run_cmd(
         [
@@ -420,8 +424,19 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
         return {"enabled": False, "message": "Web update disabled by server config"}
 
     config = _current_repo_config()
-    root = _ensure_repo_initialized(config["repo_url"], config["branch"])
+    root = _repo_path()
     branch = config["branch"]
+    if not _repo_is_initialized(root):
+        return {
+            "enabled": True,
+            "ok": False,
+            "repo_url": config["repo_url"],
+            "current_branch": branch,
+            "current_commit": "",
+            "remote_commit": "",
+            "has_update": False,
+            "message": "Repository is not initialized",
+        }
 
     rc1, current_commit, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"], timeout_sec=6)
     rc2, current_branch, err2 = _run_cmd(
@@ -521,14 +536,33 @@ async def apply_update(
 @router.get("/version/state")
 async def get_version_state(_: User = Depends(require_admin)) -> dict[str, Any]:
     config = _current_repo_config()
-    root = _ensure_repo_initialized(config["repo_url"], config["branch"])
+    root = _repo_path()
+    if not _repo_is_initialized(root):
+        return {
+            "repo_url": config["repo_url"],
+            "branch": config["branch"],
+            "commit": "",
+            "short_commit": "",
+            "tag": "",
+            "checked_at": datetime.now(UTC).isoformat(),
+            "initialized": False,
+        }
 
     rc1, branch, err1 = _run_cmd(["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"])
     rc2, commit, err2 = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"])
     rc3, short_commit, _ = _run_cmd(["git", "-C", str(root), "rev-parse", "--short", "HEAD"])
     rc4, tag, _ = _run_cmd(["git", "-C", str(root), "describe", "--tags", "--exact-match"])
     if rc1 != 0 or rc2 != 0:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err1 or err2)
+        return {
+            "repo_url": config["repo_url"],
+            "branch": config["branch"],
+            "commit": "",
+            "short_commit": "",
+            "tag": "",
+            "checked_at": datetime.now(UTC).isoformat(),
+            "initialized": True,
+            "message": err1 or err2 or "Failed to read current version state",
+        }
 
     return {
         "repo_url": config["repo_url"],
@@ -537,25 +571,28 @@ async def get_version_state(_: User = Depends(require_admin)) -> dict[str, Any]:
         "short_commit": short_commit if rc3 == 0 else "",
         "tag": tag if rc4 == 0 else "",
         "checked_at": datetime.now(UTC).isoformat(),
+        "initialized": True,
     }
 
 
 @router.get("/version/history")
 async def get_version_history(limit: int = 30, _: User = Depends(require_admin)) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 200))
-    config = _current_repo_config()
-    root = _ensure_repo_initialized(config["repo_url"], config["branch"])
+    root = _repo_path()
+    if not _repo_is_initialized(root):
+        return {"items": []}
     return {"items": _git_log_rows(str(root), safe_limit)}
 
 
 @router.get("/version/tags")
 async def get_version_tags(limit: int = 50, _: User = Depends(require_admin)) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 200))
-    config = _current_repo_config()
-    root = _ensure_repo_initialized(config["repo_url"], config["branch"])
+    root = _repo_path()
+    if not _repo_is_initialized(root):
+        return {"items": []}
     rc, out, err = _run_cmd(["git", "-C", str(root), "tag", "--sort=-creatordate"])
     if rc != 0:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err or "读取标签失败")
+        return {"items": [], "message": err or "Failed to read tags"}
     tags = [line.strip() for line in out.splitlines() if line.strip()][:safe_limit]
     return {"items": tags}
 

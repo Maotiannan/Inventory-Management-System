@@ -1,10 +1,12 @@
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import String, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.deps import get_current_user
 from app.models import InventoryTable, Item, User
@@ -19,6 +21,46 @@ async def _ensure_table(session: AsyncSession, table_id: uuid.UUID) -> Inventory
     if not table:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="表格不存在")
     return table
+
+
+def _resolve_media_path(relative_path: str | None) -> Path | None:
+    normalized = str(relative_path or "").strip().replace("\\", "/").lstrip("/")
+    if not normalized:
+        return None
+
+    images_root = Path(settings.images_dir).resolve()
+    candidate = (images_root / normalized).resolve()
+    try:
+        candidate.relative_to(images_root)
+    except ValueError:
+        return None
+    return candidate
+
+
+async def _cleanup_media_if_unused(
+    session: AsyncSession,
+    relative_path: str | None,
+    exclude_item_id: uuid.UUID | None = None,
+) -> None:
+    normalized = str(relative_path or "").strip()
+    if not normalized:
+        return
+
+    stmt = select(Item.id).where(or_(Item.image_original == normalized, Item.image_thumb == normalized)).limit(1)
+    if exclude_item_id:
+        stmt = stmt.where(Item.id != exclude_item_id)
+    in_use = await session.execute(stmt)
+    if in_use.scalar_one_or_none():
+        return
+
+    absolute_path = _resolve_media_path(normalized)
+    if not absolute_path:
+        return
+    try:
+        absolute_path.unlink(missing_ok=True)
+    except OSError:
+        # Keep request successful even if stale file cleanup fails.
+        return
 
 
 @router.get("/items", response_model=list[ItemRead])
@@ -119,6 +161,9 @@ async def update_item(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="物料不存在")
 
+    old_image_original = item.image_original
+    old_image_thumb = item.image_thumb
+
     for field_name in (
         "name",
         "code",
@@ -160,6 +205,15 @@ async def update_item(
     )
     await session.commit()
     await session.refresh(item)
+
+    stale_paths: set[str] = set()
+    if old_image_original and old_image_original != item.image_original:
+        stale_paths.add(old_image_original)
+    if old_image_thumb and old_image_thumb != item.image_thumb:
+        stale_paths.add(old_image_thumb)
+    for stale_path in stale_paths:
+        await _cleanup_media_if_unused(session, stale_path, exclude_item_id=item.id)
+
     return ItemRead.model_validate(item)
 
 
@@ -175,6 +229,8 @@ async def delete_item(
 
     code = item.code
     table_id = item.table_id
+    old_image_original = item.image_original
+    old_image_thumb = item.image_thumb
     await session.delete(item)
     await log_operation(
         session=session,
@@ -185,3 +241,7 @@ async def delete_item(
         operator_id=current_user.id,
     )
     await session.commit()
+
+    stale_paths = {path for path in (old_image_original, old_image_thumb) if path}
+    for stale_path in stale_paths:
+        await _cleanup_media_if_unused(session, stale_path)

@@ -46,7 +46,15 @@
       <section v-else-if="isMobile" class="mobile-cards">
         <article v-for="item in itemsStore.items" :key="item.id" class="item-card">
           <div class="item-card-head">
-            <img v-if="item.image_thumb" :src="mediaUrl(item.image_thumb)" class="list-thumb" alt="缩略图" />
+            <img
+              v-if="item.image_thumb"
+              :src="mediaUrl(item.image_thumb)"
+              class="list-thumb"
+              alt="缩略图"
+              title="点击更换缩略图"
+              style="cursor: pointer"
+              @click="openQuickUpload(item)"
+            />
             <n-button v-else size="small" tertiary @click="openQuickUpload(item)">上传缩略图</n-button>
             <div class="item-meta">
               <h3>{{ item.name }}</h3>
@@ -750,7 +758,14 @@ const columns = computed(() => {
             { default: () => "上传缩略图" }
           );
         }
-        return h("img", { src: mediaUrl(row.image_thumb), class: "list-thumb", alt: "缩略图" });
+        return h("img", {
+          src: mediaUrl(row.image_thumb),
+          class: "list-thumb",
+          alt: "缩略图",
+          title: "点击更换缩略图",
+          style: "cursor: pointer",
+          onClick: () => openQuickUpload(row),
+        });
       },
     },
     { title: "名称", key: "name", minWidth: 140 },
