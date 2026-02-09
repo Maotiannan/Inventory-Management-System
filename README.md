@@ -2,7 +2,7 @@
 
 基于 `FastAPI + PostgreSQL(JSONB) + Vue3 + Naive UI + Docker Compose` 的 NAS 进销存系统。
 
-- 前端：`http://<NAS_IP>:8080`
+- 前端：`http://<NAS_IP>:<FRONTEND_PORT>`（默认 `8080`，可在 `.env` 中设置 `FRONTEND_PORT=18080`）
 - 后端：`http://<NAS_IP>:8000`
 - OpenAPI：`http://<NAS_IP>:8000/docs`
 
