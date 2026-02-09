@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/postgres:16-alpine
+    container_name: znas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-znas}
+      POSTGRES_USER: ${POSTGRES_USER:-znas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-znas_pass}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  backend:
+    image: ${BACKEND_IMAGE:-znas-backend}:${APP_VERSION:-v1.0.0}
+    build:
+      context: ./backend
+    container_name: znas-backend
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-znas}:${POSTGRES_PASSWORD:-znas_pass}@postgres:5432/${POSTGRES_DB:-znas}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change_me_strong_password}
+      IMAGES_DIR: ${IMAGES_DIR:-/data/images}
+      ENABLE_WEB_OPS: ${ENABLE_WEB_OPS:-true}
+      PROJECT_ROOT: ${PROJECT_ROOT:-/data/ops/repo}
+      OPS_DIR: ${OPS_DIR:-/data/ops}
+      REPO_URL: ${REPO_URL:-}
+      UPDATE_BRANCH: ${UPDATE_BRANCH:-main}
+    volumes:
+      - images_data:/data/images
+      - ops_data:/data/ops
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').getcode()==200 else 1)\""]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    ports:
+      - "8000:8000"
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-znas-frontend}:${APP_VERSION:-v1.0.0}
+    build:
+      context: ./frontend
+    container_name: znas-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ > /dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    ports:
+      - "8080:80"
+
+  tailscale:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/tailscale/tailscale:latest
+    container_name: ${TS_CONTAINER_NAME:-tailscaled}
+    hostname: ${TS_HOSTNAME:-znas-server}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: ${TS_STATE_DIR:-/var/lib/tailscale}
+      TS_USERSPACE: ${TS_USERSPACE:-false}
+      TS_ROUTES: ${TS_ROUTES:-192.168.1.0/24}
+    volumes:
+      - ts_state_data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    network_mode: host
+    profiles:
+      - tailscale
+
+volumes:
+  db_data:
+  images_data:
+  ops_data:
+  ts_state_data:

@@ -1,0 +1,109 @@
+
+
+Role: You are an expert Full-Stack Developer specializing in Python (FastAPI), Vue 3, and Docker deployment on NAS systems.
+
+Goal: Create a modular, self-hosted Inventory/Project Management System designed to run on a Zspace (Linux) NAS via Docker.
+
+Constraints & Tech Stack:
+
+Backend: Python FastAPI (Async).
+
+Database: PostgreSQL (Must use JSONB for dynamic properties).
+
+Frontend: Vue 3 + Vite + Naive UI (Responsive design for both Android Mobile & PC Web).
+
+Deployment: Docker Compose (All services orchestrated together).
+
+Language: Use Chinese (Simp) for all comments and UI text.
+
+Core Business Logic:
+
+Data Structure (Single Source of Truth):
+
+Table: items
+
+Fixed Columns: id (UUID), name (String), code (String, unique), quantity (Int), image_original (Path), image_thumb (Path), notes (Text), updated_at (Datetime).
+
+Dynamic Column: properties (Type: JSONB). This stores custom user-defined fields (e.g., {"color": "red", "size": "42"}).
+
+Table: users (id, username, password_hash, role).
+
+Image Handling:
+
+Images are uploaded to a volume mapped to the NAS filesystem (e.g., /data/images).
+
+Backend MUST generate a thumbnail (max 300x300px) using Pillow upon upload.
+
+API returns URLs for both original and thumbnail.
+
+Synchronization (Optimistic UI):
+
+Frontend Logic: When a user updates an item (e.g., changes quantity), the UI updates immediately without waiting for the server. The request is sent in the background.
+
+Polling: The Frontend actively polls the list API every 5 seconds to fetch changes from other devices.
+
+Auth (JWT):
+
+Standard JWT Access Token.
+
+"Remember Me": Store the token in LocalStorage. On App launch, validate token; if valid, skip login screen.
+
+Default Admin User: Created on startup if not exists (User: admin, Pass: admin123 - changeable via ENV).
+
+Deliverables (Step-by-Step implementation plan):
+
+Step 1: Project Structure & Docker Compose
+
+Create a clean folder structure.
+
+Write docker-compose.yml including:
+
+postgres service (with volume persistence).
+
+backend service (FastAPI).
+
+frontend service (Node/Nginx).
+
+Crucial: Map port 8000 (Backend) and 8080 (Frontend) to host. Define volumes for DB data and Image storage.
+
+Step 2: Backend Development (FastAPI)
+
+Setup SQLModel (or SQLAlchemy) models.
+
+Create API Endpoints:
+
+POST /auth/login (Get Token)
+
+GET /items (List all, support filtering)
+
+POST /items (Create new)
+
+PATCH /items/{id} (Update fields or JSONB properties)
+
+POST /upload (Handle image -> Save -> Resize -> Return Paths)
+
+GET /config/schema (Get/Set the definition of what goes into the JSONB fields, e.g., define that "Shoes" project has "Size" field).
+
+Step 3: Frontend Development (Vue 3 mobile-first)
+
+Views:
+
+LoginView: Simple username/password.
+
+ListView: Card layout (Mobile) / Table layout (PC). Shows Thumbnail + Name + Code + Quantity.
+
+Detail/EditView: Form to edit fixed fields AND dynamic JSONB fields.
+
+SettingsView: A dedicated section to configure "Custom Fields" (which keys exist in the JSONB object).
+
+Components: Use Naive UI for inputs, buttons, and uploaders.
+
+State Management: Use Pinia to handle "Optimistic Updates" (update store state immediately, then sync with API).
+
+Step 4: "One-Click" Run Instructions
+
+Provide the exact shell commands to build and run the container.
+
+Action: Do not ask further questions. Start by generating Step 1: The Project Structure and docker-compose.yml file so I can initialize the repository.
+
+Please reply in Chinese when you finish.
