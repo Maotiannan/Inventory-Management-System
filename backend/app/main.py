@@ -96,6 +96,7 @@ app.include_router(system_ops_router)
 
 @app.get("/health", tags=["system"])
 async def health_check() -> dict[str, str]:
+    # Keep the health endpoint lightweight for container health checks.
     return {"status": "ok"}
 
 
