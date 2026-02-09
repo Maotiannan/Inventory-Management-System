@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -265,6 +266,56 @@ def _git_log_rows(repo_root: str, limit: int) -> list[dict[str, str]]:
         )
     return rows
 
+def _compose_project_name() -> str:
+    return str(os.environ.get("COMPOSE_PROJECT_NAME") or "znas").strip() or "znas"
+
+
+def _backend_container_name() -> str:
+    # keep aligned with docker-compose service container_name
+    return "znas-backend"
+
+
+def _helper_image(compose_env: dict[str, str]) -> str:
+    image_name = str(compose_env.get("BACKEND_IMAGE") or "znas-backend").strip() or "znas-backend"
+    app_version = str(compose_env.get("APP_VERSION") or "v1.0.0").strip() or "v1.0.0"
+    return f"{image_name}:{app_version}"
+
+
+def _start_ops_runner(script_cmd: str, compose_env: dict[str, str], log_filename: str) -> tuple[str, Path]:
+    log_path = _ops_dir() / log_filename
+    runner_name = f"znas-ops-{int(datetime.now(UTC).timestamp())}"
+    runner_shell = f"cd /data/ops/repo && {script_cmd} >> {shlex.quote(str(log_path))} 2>&1"
+    docker_cmd = [
+        "docker",
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        runner_name,
+        "--volumes-from",
+        _backend_container_name(),
+        "-w",
+        "/data/ops/repo",
+        "-e",
+        f"COMPOSE_PROJECT_NAME={_compose_project_name()}",
+        "-e",
+        f"UPDATE_BRANCH={compose_env.get('UPDATE_BRANCH', 'main')}",
+        "-e",
+        f"REPO_URL={compose_env.get('REPO_URL', '')}",
+        _helper_image(compose_env),
+        "sh",
+        "-lc",
+        runner_shell,
+    ]
+    rc, out, err = _run_cmd(docker_cmd, timeout_sec=20)
+    if rc != 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start update task runner: {err or out or 'unknown error'}",
+        )
+    task_id = (out.splitlines()[-1] if out else runner_name).strip() or runner_name
+    return task_id, log_path
+
 
 @router.get("/tailscale/config")
 async def get_tailscale_config(_: User = Depends(require_admin)) -> dict[str, Any]:
@@ -438,37 +489,31 @@ async def apply_update(
     root = _ensure_repo_initialized(config["repo_url"], config["branch"])
     script = root / "scripts" / "nas_update.sh"
     if not script.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="更新脚本不存在")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update script not found")
 
     compose_env = {**_read_runtime_env(), "UPDATE_BRANCH": config["branch"], "REPO_URL": config["repo_url"]}
     _ensure_repo_env_file(root, compose_env)
 
-    log_path = _ops_dir() / "update_web.log"
-    log_file = open(log_path, "a", encoding="utf-8")
-    process = subprocess.Popen(
-        ["bash", str(script)],
-        cwd=str(root),
-        stdout=log_file,
-        stderr=log_file,
-        start_new_session=True,
-        env={**os.environ, **compose_env, "COMPOSE_PROJECT_NAME": "znas"},
+    task_id, log_path = _start_ops_runner(
+        script_cmd=f"bash {shlex.quote(str(script))}",
+        compose_env=compose_env,
+        log_filename="update_web.log",
     )
-    log_file.close()
 
     await log_operation(
         session=session,
         action="apply_update",
         target="system",
         summary="Start web update task",
-        detail={"pid": process.pid},
+        detail={"task_id": task_id},
         operator_id=current_user.id,
     )
     await session.commit()
 
     return TaskStartResponse(
         started=True,
-        message="更新任务已启动，稍后请刷新页面确认版本",
-        pid=process.pid,
+        message="Update task started in background runner",
+        pid=None,
         log_path=str(log_path),
     )
 
@@ -523,42 +568,37 @@ async def rollback_version(
 ) -> TaskStartResponse:
     ref = payload.ref.strip()
     if not VALID_REF_PATTERN.fullmatch(ref):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="回滚版本格式不合法")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid rollback ref")
 
     config = _current_repo_config()
     root = _ensure_repo_initialized(config["repo_url"], config["branch"])
     script = root / "scripts" / "nas_rollback.sh"
     if not script.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="回滚脚本不存在")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rollback script not found")
 
     compose_env = {**_read_runtime_env(), "UPDATE_BRANCH": config["branch"], "REPO_URL": config["repo_url"]}
     _ensure_repo_env_file(root, compose_env)
 
-    log_path = _ops_dir() / "rollback_web.log"
-    log_file = open(log_path, "a", encoding="utf-8")
-    process = subprocess.Popen(
-        ["bash", str(script), ref],
-        cwd=str(root),
-        stdout=log_file,
-        stderr=log_file,
-        start_new_session=True,
-        env={**os.environ, **compose_env, "COMPOSE_PROJECT_NAME": "znas"},
+    task_id, log_path = _start_ops_runner(
+        script_cmd=f"bash {shlex.quote(str(script))} {shlex.quote(ref)}",
+        compose_env=compose_env,
+        log_filename="rollback_web.log",
     )
-    log_file.close()
 
     await log_operation(
         session=session,
         action="rollback_version",
         target=ref,
         summary=f"Start rollback to {ref}",
-        detail={"pid": process.pid, "ref": ref},
+        detail={"task_id": task_id, "ref": ref},
         operator_id=current_user.id,
     )
     await session.commit()
 
     return TaskStartResponse(
         started=True,
-        message=f"已开始回滚到 {ref}，请稍后刷新查看状态",
-        pid=process.pid,
+        message=f"Rollback task started: {ref}",
+        pid=None,
         log_path=str(log_path),
     )
+

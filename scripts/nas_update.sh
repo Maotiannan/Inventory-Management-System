@@ -41,6 +41,7 @@ git pull --ff-only origin "$BRANCH"
 
 echo "[5/7] Rebuild and restart services"
 compose_cmd up -d --build
+compose_cmd restart frontend
 
 echo "[6/7] Show container status"
 compose_cmd ps

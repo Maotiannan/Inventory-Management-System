@@ -32,6 +32,7 @@ git checkout "$TARGET_REF"
 
 echo "[3/5] Rebuild and restart services"
 compose_cmd up -d --build
+compose_cmd restart frontend
 
 echo "[4/5] Show container status"
 compose_cmd ps
