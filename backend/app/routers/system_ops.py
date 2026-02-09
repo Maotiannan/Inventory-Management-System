@@ -680,3 +680,44 @@ async def rollback_version(
         log_path=str(log_path),
     )
 
+
+@router.post("/version/rollback/latest", response_model=TaskStartResponse)
+async def rollback_latest_version(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_admin),
+) -> TaskStartResponse:
+    config = _current_repo_config()
+    branch = str(config.get("branch") or "main").strip() or "main"
+    latest_ref = f"origin/{branch}"
+
+    root = _ensure_repo_initialized(config["repo_url"], branch)
+    script = root / "scripts" / "nas_rollback.sh"
+    if not script.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rollback script not found")
+
+    compose_env = {**_read_runtime_env(), "UPDATE_BRANCH": branch, "REPO_URL": config["repo_url"]}
+    _ensure_repo_env_file(root, compose_env)
+
+    task_id, log_path = _start_ops_runner(
+        script_cmd=f"bash {shlex.quote(str(script))} {shlex.quote(latest_ref)}",
+        compose_env=compose_env,
+        log_filename="rollback_web.log",
+    )
+
+    await log_operation(
+        session=session,
+        action="rollback_latest_version",
+        target=latest_ref,
+        summary=f"Start rollback to latest {latest_ref}",
+        detail={"task_id": task_id, "ref": latest_ref},
+        operator_id=current_user.id,
+    )
+    await session.commit()
+
+    return TaskStartResponse(
+        started=True,
+        message=f"Rollback-to-latest task started: {latest_ref}",
+        pid=None,
+        log_path=str(log_path),
+    )
+

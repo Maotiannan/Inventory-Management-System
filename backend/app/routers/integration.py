@@ -84,6 +84,7 @@ async def get_api_reference(
             "GET /system/version/history (admin)",
             "GET /system/version/tags (admin)",
             "POST /system/version/rollback (admin)",
+            "POST /system/version/rollback/latest (admin)",
         ],
     }
 

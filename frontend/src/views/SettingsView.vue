@@ -174,8 +174,16 @@
           <n-divider />
           <n-h4>精确回滚</n-h4>
           <n-space>
-            <n-input v-model:value="rollbackRef" placeholder="输入 tag/commit，例如 v1.0.0 或 commit SHA" />
+            <n-select
+              v-model:value="rollbackRef"
+              :options="rollbackSelectOptions"
+              filterable
+              clearable
+              style="min-width: 380px"
+              placeholder="选择最近版本（tag/commit）"
+            />
             <n-button type="error" :loading="rollingBack" @click="rollbackToRef">执行回滚</n-button>
+            <n-button type="warning" :loading="rollingToLatest" @click="rollbackToLatest">滚回最新版</n-button>
             <n-button :loading="refreshingVersionMeta" @click="refreshVersionMeta">刷新版本信息</n-button>
           </n-space>
 
@@ -286,6 +294,7 @@ const checkingUpdate = ref(false);
 const applyingUpdate = ref(false);
 const savingRepo = ref(false);
 const rollingBack = ref(false);
+const rollingToLatest = ref(false);
 const refreshingVersionMeta = ref(false);
 
 const newTableName = ref("");
@@ -372,6 +381,42 @@ const apiReferenceText = computed(() => {
   return Object.entries(apiReference.value || {})
     .map(([k, arr]) => `${k}:\n${Array.isArray(arr) ? arr.map((x) => `  - ${x}`).join("\n") : ""}`)
     .join("\n\n");
+});
+
+const rollbackSelectOptions = computed(() => {
+  const options = [];
+  const seen = new Set();
+  const pushOption = (value, label) => {
+    const normalized = String(value || "").trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    options.push({ label, value: normalized });
+  };
+
+  const remoteCommit = String(updateStatus.value.remote_commit || "").trim();
+  if (remoteCommit) {
+    pushOption(remoteCommit, `远端最新版 ${remoteCommit.slice(0, 8)}`);
+  }
+
+  const currentCommit = String(versionState.value.commit || updateStatus.value.current_commit || "").trim();
+  if (currentCommit) {
+    pushOption(currentCommit, `当前版本 ${currentCommit.slice(0, 8)}`);
+  }
+
+  for (const row of versionTags.value || []) {
+    pushOption(row?.tag, `Tag: ${row?.tag}`);
+  }
+
+  for (const row of versionHistory.value || []) {
+    const commit = String(row?.commit || "").trim();
+    const shortCommit = String(row?.short_commit || "").trim() || commit.slice(0, 8);
+    const subject = String(row?.subject || "").trim();
+    pushOption(commit, subject ? `${shortCommit} ${subject}` : shortCommit);
+  }
+
+  return options;
 });
 
 function parseOptions(text) {
@@ -662,7 +707,11 @@ async function checkUpdateStatus(silent = false) {
     const { data } = await http.get("/system/update/status", { timeout: 20000 });
     updateStatus.value = { ...updateStatus.value, ...data };
     if (!silent) {
-      message.info(data.message || "Update status refreshed");
+      if (data?.ok) {
+        message.success(data.message || "更新状态已刷新");
+      } else {
+        message.warning(data?.message || "更新状态已刷新（存在异常）");
+      }
     }
   } catch (error) {
     const detail =
@@ -780,6 +829,20 @@ function pickRollbackRef(value) {
   rollbackRef.value = value;
 }
 
+async function startRollbackTask(ref, endpoint, loadingRef, successFallback) {
+  loadingRef.value = true;
+  try {
+    const { data } = await http.post(endpoint, ref ? { ref } : undefined);
+    message.success(data?.message || successFallback);
+    await refreshVersionMeta();
+    await checkUpdateStatus(true);
+  } catch (error) {
+    message.error(error?.response?.data?.detail || "启动回滚失败");
+  } finally {
+    loadingRef.value = false;
+  }
+}
+
 async function rollbackToRef() {
   const ref = String(rollbackRef.value || "").trim();
   if (!ref) {
@@ -793,15 +856,20 @@ async function rollbackToRef() {
     positiveText: "确认回滚",
     negativeText: "取消",
     async onPositiveClick() {
-      rollingBack.value = true;
-      try {
-        const { data } = await http.post("/system/version/rollback", { ref });
-        message.success(data?.message || "回滚任务已启动");
-      } catch (error) {
-        message.error(error?.response?.data?.detail || "启动回滚失败");
-      } finally {
-        rollingBack.value = false;
-      }
+      await startRollbackTask(ref, "/system/version/rollback", rollingBack, "回滚任务已启动");
+    },
+  });
+}
+
+async function rollbackToLatest() {
+  const branch = String(repoConfig.value.branch || versionState.value.branch || "main").trim() || "main";
+  dialog.warning({
+    title: "确认滚回最新版",
+    content: `将切换到远端分支 ${branch} 的最新提交并重启服务。`,
+    positiveText: "确认执行",
+    negativeText: "取消",
+    async onPositiveClick() {
+      await startRollbackTask("", "/system/version/rollback/latest", rollingToLatest, "滚回最新版任务已启动");
     },
   });
 }
