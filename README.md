@@ -205,3 +205,94 @@ COMPOSE_PROJECT_NAME=znas docker compose ps
 docker logs -f znas-backend
 ```
 
+🎯 背景问题
+
+在 NAS（ZOS 定制 Linux 系统）环境中，项目使用 HTTPS 方式访问 GitHub 时持续报错：
+
+gnutls_handshake() failed: Error in the pull function.
+
+
+排查结果：
+
+curl https://github.com 正常
+
+git fetch 失败
+
+Git 版本为 2.34.1
+
+NAS 用户环境存在异常（HOME 配置错误）
+
+同时发现：
+
+当前用户 $HOME 被错误设置为 /home/
+
+系统未为用户创建真实 home 目录
+
+SSH key 无法正常生成
+
+NAS 用户结构为定制环境，非标准 Linux 用户体系
+
+导致 Git HTTPS 认证方式不稳定。
+
+✅ 解决方案
+1️⃣ 放弃 HTTPS，改为 SSH 方式访问 GitHub
+
+原远程地址：
+
+https://github.com/Maotiannan/Inventory-Management-System.git
+
+
+修改为：
+
+git@github.com:Maotiannan/Inventory-Management-System.git
+
+
+此举直接绕过 TLS / GnuTLS 兼容问题。
+
+2️⃣ 使用 root 作为部署身份
+
+由于 NAS 普通用户 home 配置异常，决定采用更稳定的服务器部署方案：
+
+切换至 root 用户
+
+在 /root/.ssh/ 下生成 SSH key
+
+将公钥添加至 GitHub 账户
+
+生成命令：
+
+ssh-keygen -t ed25519 -C "znas-root"
+
+3️⃣ 验证 SSH 连接
+ssh -T git@github.com
+
+
+返回：
+
+Hi Maotiannan! You've successfully authenticated...
+
+
+说明认证成功。
+
+4️⃣ 成功拉取代码
+git fetch --all --prune
+
+
+仓库更新恢复正常。
+
+🧱 当前部署结构
+NAS (ZOS 系统)
+ └── root 用户
+     └── /root/.ssh/id_ed25519
+         └── GitHub SSH 认证
+             └── 项目目录
+                 └── Docker 部署
+
+
+该结构优势：
+
+消除 HTTPS TLS 不稳定因素
+
+避开 NAS 用户 home 异常问题
+
+提供稳定的服务器级部署基础
