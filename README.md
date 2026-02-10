@@ -66,9 +66,7 @@ COMPOSE_PROJECT_NAME=znas docker compose ps
 docker logs --tail=100 znas-backend
 ```
 
-## 3. 日常维护（你问的“新设备怎么维护”）
-
-答案是：**是的，推荐这样做**。
+## 3. 日常维护
 
 标准流程：
 
@@ -206,3 +204,4 @@ COMPOSE_PROJECT_NAME=znas docker compose ps
 # 后端日志
 docker logs -f znas-backend
 ```
+
