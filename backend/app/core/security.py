@@ -19,7 +19,7 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
-    expire_minutes = expires_minutes or settings.access_token_expire_minutes
+    expire_minutes = expires_minutes if expires_minutes is not None else settings.access_token_expire_minutes
     expire_at = datetime.now(UTC) + timedelta(minutes=expire_minutes)
     payload = {"sub": subject, "exp": expire_at}
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)

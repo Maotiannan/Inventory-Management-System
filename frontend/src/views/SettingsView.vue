@@ -553,7 +553,7 @@ function removeTable(row) {
           });
           return;
         }
-        message.error(detail || "删除失败");
+        message.error(typeof detail === "string" ? detail : "删除失败");
       }
     },
   });

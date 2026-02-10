@@ -434,34 +434,7 @@ async function handleScanCode(task) {
 
   if (scanner.mode === "in") {
     try {
-      const existing = await findItemInTable(scanner.tableId, code);
-      if (!existing) {
-        const { data } = await http.post("/stock/in", {
-          table_id: scanner.tableId,
-          code,
-          quantity: 1,
-        });
-        upsertListWhenActiveTable(data);
-
-        scanner.records.unshift(
-          createScanRecord({
-            code,
-            name: data.name,
-            item_id: data.id,
-            created_new: true,
-            source_line_index: sourceLineIndex,
-            table_id: scanner.tableId,
-            action_label: actionLabel,
-            status: "成功",
-            stock_after: data.quantity,
-            message: "新条目已按默认品名 NUM 入库，可在此处直接改名",
-            editable_name: true,
-            draft_name: data.name || "",
-          })
-        );
-        return;
-      }
-
+      // BUG-12: 直接调用 stock/in，后端已处理"不存在则创建"，无需额外查询
       const { data } = await http.post("/stock/in", {
         table_id: scanner.tableId,
         code,
@@ -469,18 +442,21 @@ async function handleScanCode(task) {
       });
       upsertListWhenActiveTable(data);
 
+      const isNewItem = data.quantity === 1;
       scanner.records.unshift(
         createScanRecord({
           code,
           name: data.name,
           item_id: data.id,
-          created_new: false,
+          created_new: isNewItem,
           source_line_index: sourceLineIndex,
           table_id: scanner.tableId,
           action_label: actionLabel,
           status: "成功",
           stock_after: data.quantity,
-          message: "自动入库完成",
+          message: isNewItem ? "新条目已按默认品名 NUM 入库，可在此处直接改名" : "自动入库完成",
+          editable_name: isNewItem,
+          draft_name: isNewItem ? (data.name || "") : "",
         })
       );
     } catch (error) {

@@ -5,9 +5,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.deps import get_current_user
 from app.models import InventoryTable, Item, User
+from app.routers.items import _cleanup_media_if_unused
 from app.services.logs import log_operation
 
 router = APIRouter(prefix="/tables", tags=["tables"])
@@ -80,7 +82,10 @@ async def update_table(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="表格不存在")
 
     if payload.get("name") is not None:
-        table.name = str(payload.get("name")).strip()
+        updated_name = str(payload.get("name")).strip()
+        if not updated_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="表格名称不能为空")
+        table.name = updated_name
     if payload.get("schema") is not None:
         if not isinstance(payload.get("schema"), dict):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schema 必须是对象")
@@ -131,10 +136,21 @@ async def delete_table(
         )
 
     if items_count > 0 and purge_items:
+        # BUG-04: 删除前先收集所有物料的图片路径，删除后逐个清理磁盘文件
+        img_stmt = select(Item.image_original, Item.image_thumb).where(Item.table_id == table_id)
+        img_result = await session.execute(img_stmt)
+        stale_paths: set[str] = set()
+        for row in img_result.all():
+            if row.image_original:
+                stale_paths.add(row.image_original)
+            if row.image_thumb:
+                stale_paths.add(row.image_thumb)
+
         delete_result = await session.execute(delete(Item).where(Item.table_id == table_id))
         deleted_items = int(delete_result.rowcount or 0)
     else:
         deleted_items = 0
+        stale_paths = set()
 
     table_name = table.name
     await session.delete(table)
@@ -147,3 +163,7 @@ async def delete_table(
         operator_id=current_user.id,
     )
     await session.commit()
+
+    # BUG-04: 提交后清理孤立图片文件
+    for stale_path in stale_paths:
+        await _cleanup_media_if_unused(session, stale_path)

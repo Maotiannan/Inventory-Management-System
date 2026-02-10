@@ -105,10 +105,19 @@ export const useItemsStore = defineStore("items", {
 
       try {
         const { data } = await http.patch(`/items/${itemId}`, patch);
-        this.items[index] = data;
+        // BUG-03: 用 id 重新查找，避免轮询替换数组后 index 失效
+        const freshIndex = this.items.findIndex((item) => item.id === itemId);
+        if (freshIndex >= 0) {
+          this.items[freshIndex] = data;
+        } else {
+          this.items.unshift(data);
+        }
         return data;
       } catch (error) {
-        this.items[index] = backup;
+        const rollbackIndex = this.items.findIndex((item) => item.id === itemId);
+        if (rollbackIndex >= 0) {
+          this.items[rollbackIndex] = backup;
+        }
         throw error;
       }
     },
@@ -133,8 +142,12 @@ export const useItemsStore = defineStore("items", {
         this.upsertItem(data);
         return data;
       } catch (error) {
-        if (index >= 0 && backup) {
-          this.items[index] = backup;
+        // BUG-03: 用 id 重新查找回滚，避免轮询替换数组后 index 失效
+        if (backup) {
+          const rollbackIndex = this.items.findIndex((item) => item.id === backup.id);
+          if (rollbackIndex >= 0) {
+            this.items[rollbackIndex] = backup;
+          }
         }
         throw error;
       }
@@ -158,8 +171,12 @@ export const useItemsStore = defineStore("items", {
         this.upsertItem(data);
         return data;
       } catch (error) {
-        if (index >= 0 && backup) {
-          this.items[index] = backup;
+        // BUG-03: 用 id 重新查找回滚，避免轮询替换数组后 index 失效
+        if (backup) {
+          const rollbackIndex = this.items.findIndex((item) => item.id === backup.id);
+          if (rollbackIndex >= 0) {
+            this.items[rollbackIndex] = backup;
+          }
         }
         throw error;
       }

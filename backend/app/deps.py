@@ -30,9 +30,9 @@ async def _get_user_by_api_key(session: AsyncSession, raw_api_key: str) -> tuple
     if not api_key:
         return None
 
+    # BUG-02: 只 flush 不 commit，让事务随 endpoint 一起提交
     api_key.last_used_at = datetime.now(UTC)
     await session.flush()
-    await session.commit()
     user = await session.get(User, api_key.owner_id)
     if not user:
         return None

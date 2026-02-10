@@ -1,8 +1,16 @@
 ﻿import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+# 哨兵值：区分 "用户未提供该字段" 和 "用户想清空该字段为 null"
+_UNSET = object()
+
+
+class _Unset(Enum):
+    UNSET = "UNSET"
 
 
 class LoginRequest(BaseModel):
@@ -53,10 +61,11 @@ class ItemCreate(BaseModel):
 class ItemUpdate(BaseModel):
     name: str | None = None
     code: str | None = None
-    quantity: int | None = None
-    image_original: str | None = None
-    image_thumb: str | None = None
-    notes: str | None = None
+    quantity: int | None = Field(default=None, ge=0)  # BUG-08: 禁止负值
+    # BUG-01: 使用 _UNSET 哨兵值区分 "未提供" 和 "要清空"
+    image_original: str | None | _Unset = _Unset.UNSET
+    image_thumb: str | None | _Unset = _Unset.UNSET
+    notes: str | None | _Unset = _Unset.UNSET
     properties: dict[str, Any] | None = None
     properties_patch: dict[str, Any] | None = None
     properties_remove: list[str] | None = None

@@ -12,6 +12,7 @@ from app.schemas import UploadResponse
 
 router = APIRouter(tags=["upload"])
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif"}
+MAX_UPLOAD_SIZE = 30 * 1024 * 1024  # 30MB，与 nginx 保持一致
 
 try:
     from pillow_heif import register_heif_opener
@@ -34,6 +35,9 @@ async def upload_image(
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
+    # BUG-09: 限制上传大小，防止绕过 nginx 直接访问后端 OOM
+    if len(file_bytes) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="文件大小超过 30MB 限制")
 
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTS:

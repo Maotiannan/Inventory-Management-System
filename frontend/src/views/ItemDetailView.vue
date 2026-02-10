@@ -186,8 +186,7 @@ async function uploadImage({ file, onFinish, onError }) {
 }
 
 function buildPayload() {
-  return {
-    table_id: currentTableId.value,
+  const base = {
     name: form.name.trim(),
     code: form.code.trim(),
     quantity: Number(form.quantity || 0),
@@ -196,6 +195,11 @@ function buildPayload() {
     notes: form.notes || null,
     properties: { ...(form.properties || {}) },
   };
+  // BUG-14: 仅新建时包含 table_id，编辑时后端 schema 不接受此字段
+  if (isNew) {
+    base.table_id = currentTableId.value;
+  }
+  return base;
 }
 
 async function saveItem() {

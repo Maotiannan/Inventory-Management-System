@@ -144,7 +144,7 @@ async def list_api_keys(
             id=row.id,
             name=row.name,
             key_prefix=row.key_prefix,
-            api_key=row.api_key or "",
+            api_key=f"{row.key_prefix}••••••••",  # BUG-05: 不再返回完整 key，只展示前缀
             active=row.active,
             created_at=row.created_at,
             last_used_at=row.last_used_at,

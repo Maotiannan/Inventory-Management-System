@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.deps import get_current_user
 from app.models import InventoryTable, Item, User
-from app.schemas import ItemCreate, ItemRead, ItemUpdate
+from app.schemas import ItemCreate, ItemRead, ItemUpdate, _Unset
 from app.services.logs import log_operation
 
 router = APIRouter(tags=["items"])
@@ -164,27 +164,34 @@ async def update_item(
     old_image_original = item.image_original
     old_image_thumb = item.image_thumb
 
-    for field_name in (
-        "name",
-        "code",
-        "quantity",
-        "image_original",
-        "image_thumb",
-        "notes",
-    ):
+    # BUG-01: 非 nullable 字段仍用 is not None 判断
+    for field_name in ("name", "code", "quantity"):
         value = getattr(payload, field_name)
         if value is not None:
             setattr(item, field_name, value)
 
-    working_properties = dict(item.properties or {})
-    if payload.properties is not None:
-        working_properties = dict(payload.properties)
-    if payload.properties_patch:
-        working_properties.update(payload.properties_patch)
-    if payload.properties_remove:
-        for key in payload.properties_remove:
-            working_properties.pop(key, None)
-    item.properties = working_properties
+    # BUG-01: nullable 字段使用 _Unset 哨兵值区分 "未提供" 和 "要清空"
+    for field_name in ("image_original", "image_thumb", "notes"):
+        value = getattr(payload, field_name)
+        if value is not _Unset.UNSET:
+            setattr(item, field_name, value)
+
+    # BUG-07: 仅在用户实际提供了 properties 相关字段时才更新
+    has_properties_change = (
+        payload.properties is not None
+        or payload.properties_patch
+        or payload.properties_remove
+    )
+    if has_properties_change:
+        working_properties = dict(item.properties or {})
+        if payload.properties is not None:
+            working_properties = dict(payload.properties)
+        if payload.properties_patch:
+            working_properties.update(payload.properties_patch)
+        if payload.properties_remove:
+            for key in payload.properties_remove:
+                working_properties.pop(key, None)
+        item.properties = working_properties
 
     try:
         await session.flush()
