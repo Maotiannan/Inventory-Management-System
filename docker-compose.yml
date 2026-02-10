@@ -33,6 +33,12 @@ services:
       OPS_DIR: ${OPS_DIR:-/data/ops}
       REPO_URL: ${REPO_URL:-}
       UPDATE_BRANCH: ${UPDATE_BRANCH:-main}
+
+      # ---- 代理配置（从 .env 读取）----
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres}
+
     volumes:
       - images_data:/data/images
       - ops_data:/data/ops
@@ -55,6 +61,10 @@ services:
       context: ./frontend
     container_name: znas-frontend
     restart: unless-stopped
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,backend}
     depends_on:
       backend:
         condition: service_healthy
