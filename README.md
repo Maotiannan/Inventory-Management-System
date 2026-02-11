@@ -223,7 +223,32 @@ NAS (ZOS 系统)
 | 版本管理 | `GET /system/version/state`、`GET /system/version/history`、`GET /system/version/tags` |
 | 回滚 | `POST /system/version/rollback`、`POST /system/version/rollback/latest` |
 
-## 8. 模块化开发规范
+## 8. 版本命名规则
+
+项目根目录下的 `VERSION` 文件记录当前版本号，格式为 `V<major>.<minor>.<patch>`，网页端底部同步显示。
+
+### 8.1 版本递增规则
+
+| 级别 | 触发条件 | 示例 |
+|------|----------|------|
+| patch +0.0.1 | 每次提交到 `main` 分支 | V1.0.0 → V1.0.1 |
+| minor +0.1.0 | patch 累计满 10 次（即 x.x.9 → x.x+1.0） | V1.0.9 → V1.1.0 |
+| major +1.0.0 | minor 累计满 100 次（即 x.99.x → x+1.0.0） | V1.99.9 → V2.0.0 |
+
+### 8.2 版本更新流程
+
+1. 修改代码并自测
+2. 修改 `VERSION` 文件中的版本号（按上述规则递增）
+3. commit 并 push 到 `main`
+4. NAS 网页端点击 `一键更新并重启`
+
+### 8.3 版本显示
+
+- 后端提供 `GET /version` 接口，读取 `VERSION` 文件内容
+- 前端所有页面底部显示 `ZNAS V<x.y.z>`
+- 系统运维页面的「检查更新」显示当前/远端版本的短哈希、提交时间、提交摘要
+
+## 9. 模块化开发规范
 
 模块开发请遵循：`docs/MODULE_UPDATE_SPEC.md`
 
@@ -232,7 +257,7 @@ NAS (ZOS 系统)
 - 变更可灰度/可回退
 - 发布前有最小回归检查
 
-## 9. 常用命令速查
+## 10. 常用命令速查
 
 ```bash
 # 启动

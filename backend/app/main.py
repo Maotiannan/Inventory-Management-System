@@ -103,3 +103,12 @@ async def health_check() -> dict[str, str]:
 @app.get("/", tags=["system"])
 async def root() -> dict[str, str]:
     return {"message": "进销存后端服务已启动"}
+
+
+@app.get("/version", tags=["system"])
+async def get_app_version() -> dict[str, str]:
+    version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    version = "unknown"
+    if version_file.exists():
+        version = version_file.read_text(encoding="utf-8").strip()
+    return {"version": version}

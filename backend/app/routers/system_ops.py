@@ -498,15 +498,6 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
         timeout_sec=35,
     )
 
-    if rc_fetch == 0:
-        # fetch 成功后，将运维仓库 HEAD 同步到远端最新，避免与项目目录脱节
-        _run_cmd(["git", "-C", str(root), "reset", "--hard", f"origin/{branch}"], timeout_sec=10)
-        # 重新读取同步后的 HEAD
-        rc_re, synced_commit, _ = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"], timeout_sec=8)
-        if rc_re == 0 and synced_commit:
-            current_commit = synced_commit
-            current_info = _commit_info(root, "HEAD")
-
     if rc_fetch != 0:
         remote_commit, resolve_err = _resolve_remote_commit(root, branch, timeout_sec=25)
         if remote_commit:
@@ -584,6 +575,12 @@ async def apply_update(
 
     config = _current_repo_config()
     root = _ensure_repo_initialized(config["repo_url"], config["branch"])
+
+    # 执行更新前，先将运维仓库同步到远端最新
+    _ensure_git_safe_directory(root)
+    _run_cmd(["git", "-C", str(root), "fetch", "origin", config["branch"]], timeout_sec=35)
+    _run_cmd(["git", "-C", str(root), "reset", "--hard", f"origin/{config['branch']}"], timeout_sec=10)
+
     script = root / "scripts" / "nas_update.sh"
     if not script.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update script not found")
@@ -695,6 +692,12 @@ async def rollback_version(
 
     config = _current_repo_config()
     root = _ensure_repo_initialized(config["repo_url"], config["branch"])
+
+    # 回滚前先 fetch，然后将运维仓库 checkout 到目标版本
+    _ensure_git_safe_directory(root)
+    _run_cmd(["git", "-C", str(root), "fetch", "--all", "--tags"], timeout_sec=35)
+    _run_cmd(["git", "-C", str(root), "checkout", ref], timeout_sec=10)
+
     script = root / "scripts" / "nas_rollback.sh"
     if not script.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rollback script not found")
@@ -736,6 +739,12 @@ async def rollback_latest_version(
     latest_ref = f"origin/{branch}"
 
     root = _ensure_repo_initialized(config["repo_url"], branch)
+
+    # 滚回最新版前，先 fetch 并 reset 运维仓库到远端最新
+    _ensure_git_safe_directory(root)
+    _run_cmd(["git", "-C", str(root), "fetch", "origin", branch], timeout_sec=35)
+    _run_cmd(["git", "-C", str(root), "reset", "--hard", f"origin/{branch}"], timeout_sec=10)
+
     script = root / "scripts" / "nas_rollback.sh"
     if not script.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Rollback script not found")
