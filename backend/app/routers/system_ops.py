@@ -497,6 +497,16 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
         ["git", "-C", str(root), "fetch", "origin", branch],
         timeout_sec=35,
     )
+
+    if rc_fetch == 0:
+        # fetch 成功后，将运维仓库 HEAD 同步到远端最新，避免与项目目录脱节
+        _run_cmd(["git", "-C", str(root), "reset", "--hard", f"origin/{branch}"], timeout_sec=10)
+        # 重新读取同步后的 HEAD
+        rc_re, synced_commit, _ = _run_cmd(["git", "-C", str(root), "rev-parse", "HEAD"], timeout_sec=8)
+        if rc_re == 0 and synced_commit:
+            current_commit = synced_commit
+            current_info = _commit_info(root, "HEAD")
+
     if rc_fetch != 0:
         remote_commit, resolve_err = _resolve_remote_commit(root, branch, timeout_sec=25)
         if remote_commit:
