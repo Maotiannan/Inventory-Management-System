@@ -964,7 +964,7 @@ const userColumns = [
 const apiKeyColumns = [
   { title: "名称", key: "name", minWidth: 120 },
   { title: "前缀", key: "key_prefix", minWidth: 120 },
-  { title: "完整Key", key: "api_key", minWidth: 220 },
+  { title: "密钥", key: "api_key", minWidth: 220 },
   { title: "创建时间", key: "created_at", minWidth: 160 },
   { title: "最近调用", key: "last_used_at", minWidth: 160 },
   {

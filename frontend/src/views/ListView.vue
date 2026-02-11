@@ -395,13 +395,6 @@ function createScanRecord(payload) {
   };
 }
 
-async function findItemInTable(tableId, code) {
-  const { data } = await http.get("/items", { params: { table_id: tableId, code } });
-  if (Array.isArray(data) && data.length > 0) {
-    return data[0];
-  }
-  return null;
-}
 
 function upsertListWhenActiveTable(updatedItem) {
   if (updatedItem?.table_id === tablesStore.activeTableId) {

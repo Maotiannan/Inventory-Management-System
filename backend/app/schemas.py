@@ -51,7 +51,7 @@ class ItemCreate(BaseModel):
     table_id: uuid.UUID
     name: str
     code: str
-    quantity: int = 0
+    quantity: int = Field(default=0, ge=0)
     image_original: str | None = None
     image_thumb: str | None = None
     notes: str | None = None
