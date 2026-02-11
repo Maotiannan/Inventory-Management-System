@@ -1,4 +1,4 @@
-﻿# 进销存系统（ZNAS）
+# 进销存系统（ZNAS）
 
 基于 `FastAPI + PostgreSQL + Vue3 + Naive UI + Docker Compose` 的 NAS 生产部署版进销存系统。
 
@@ -15,7 +15,7 @@
 - 人类可读操作日志（区分账号与 API Key）
 - 系统运维（管理员）：
   - 仓库配置
-  - 检查更新
+  - 检查更新（含版本提交时间）
   - 一键更新并重启
   - 精确回滚（最近版本下拉）
   - 滚回最新版（一键回到 `origin/<branch>`）
@@ -93,7 +93,7 @@ git push origin main
 
 ### 4.1 项目更新
 
-- `检查更新`：显示当前分支、当前版本、远端版本、状态
+- `检查更新`：显示当前分支、当前版本（短哈希+提交时间）、远端版本、状态
 - `一键更新并重启`：后台执行 `scripts/nas_update.sh`
 
 ### 4.2 精确回滚
@@ -137,9 +137,40 @@ cd /tmp/zfsv3/nvme11/.../data/docker/ZNAS
 bash scripts/nas_rollback.sh origin/main
 ```
 
-## 6. Git 网络不稳定（TLS/超时）处理
+## 6. NAS 网络问题排查
 
-如果 NAS `git fetch` 偶发失败：
+### 6.1 HTTPS 方式 TLS 失败
+
+NAS（ZOS 定制 Linux）环境中 `git fetch` 可能报错：
+
+```
+gnutls_handshake() failed: Error in the pull function.
+```
+
+**原因**：NAS 的 Git 2.34.1 使用的 GnuTLS 与 GitHub TLS 存在兼容性问题，加上 NAS 用户 `$HOME` 被错误设置为 `/home/`，导致 HTTPS 认证不稳定。
+
+**解决方案**：改用 SSH 方式访问 GitHub。
+
+```bash
+# 1. 切换到 root 用户，生成 SSH key
+sudo su -
+ssh-keygen -t ed25519 -C "znas-root"
+
+# 2. 将公钥添加到 GitHub 账户
+cat /root/.ssh/id_ed25519.pub
+
+# 3. 验证 SSH 连接
+ssh -T git@github.com
+
+# 4. 修改仓库远程地址为 SSH
+cd /tmp/zfsv3/nvme11/.../data/docker/ZNAS
+git remote set-url origin git@github.com:Maotiannan/Inventory-Management-System.git
+
+# 5. 验证拉取
+git fetch --all --prune
+```
+
+### 6.2 HTTPS 临时修复（不推荐）
 
 ```bash
 git config --local http.version HTTP/1.1
@@ -147,11 +178,28 @@ git remote set-url origin https://github.com/Maotiannan/Inventory-Management-Sys
 git fetch --all --prune
 ```
 
-如果网页端运维仓库源错误，修复：
+### 6.3 修复容器内运维仓库源
 
 ```bash
-sudo docker exec znas-backend sh -lc 'git -C /data/ops/repo remote set-url origin https://github.com/Maotiannan/Inventory-Management-System.git; git -C /data/ops/repo config http.version HTTP/1.1; printf "%s\n" "{""repo_url"":""https://github.com/Maotiannan/Inventory-Management-System.git"",""branch"":""main""}" > /data/ops/repo_config.json'
+sudo docker exec znas-backend sh -c '\
+  git -C /data/ops/repo remote set-url origin https://github.com/Maotiannan/Inventory-Management-System.git && \
+  git -C /data/ops/repo config http.version HTTP/1.1 && \
+  echo "{\"repo_url\":\"https://github.com/Maotiannan/Inventory-Management-System.git\",\"branch\":\"main\"}" > /data/ops/repo_config.json'
 COMPOSE_PROJECT_NAME=znas sudo -E docker compose restart backend
+```
+
+### 6.4 部署架构
+
+```
+NAS (ZOS 系统)
+└── root 用户
+    └── /root/.ssh/id_ed25519 (GitHub SSH 认证)
+        └── 项目目录 (/tmp/zfsv3/.../ZNAS)
+            └── Docker Compose 部署
+                ├── znas-postgres
+                ├── znas-backend
+                ├── znas-frontend
+                └── tailscale (可选)
 ```
 
 ## 7. API 概览
@@ -163,26 +211,21 @@ COMPOSE_PROJECT_NAME=znas sudo -E docker compose restart backend
 
 核心接口：
 
-- 认证：`POST /auth/login`、`GET /auth/validate`
-- 用户：`GET/POST/DELETE /users`
-- 表格：`GET/POST/PATCH/DELETE /tables`
-- 物料：`GET/POST/PATCH/DELETE /items`
-- 出入库：`POST /stock/in`、`POST /stock/out`
-- 上传：`POST /upload`
-- 系统运维（管理员）：
-  - `GET /system/update/status`
-  - `POST /system/update/apply`
-  - `GET /system/version/state`
-  - `GET /system/version/history`
-  - `GET /system/version/tags`
-  - `POST /system/version/rollback`
-  - `POST /system/version/rollback/latest`
+| 模块 | 接口 |
+|------|------|
+| 认证 | `POST /auth/login`、`GET /auth/validate` |
+| 用户 | `GET/POST/DELETE /users` |
+| 表格 | `GET/POST/PATCH/DELETE /tables` |
+| 物料 | `GET/POST/PATCH/DELETE /items` |
+| 出入库 | `POST /stock/in`、`POST /stock/out` |
+| 上传 | `POST /upload` |
+| 系统运维 | `GET /system/update/status`、`POST /system/update/apply` |
+| 版本管理 | `GET /system/version/state`、`GET /system/version/history`、`GET /system/version/tags` |
+| 回滚 | `POST /system/version/rollback`、`POST /system/version/rollback/latest` |
 
 ## 8. 模块化开发规范
 
 模块开发请遵循：`docs/MODULE_UPDATE_SPEC.md`
-
-重点：
 
 - 每个模块必须有清晰 API
 - 迁移脚本可回滚
@@ -203,96 +246,7 @@ COMPOSE_PROJECT_NAME=znas docker compose ps
 
 # 后端日志
 docker logs -f znas-backend
+
+# 前端日志
+docker logs -f znas-frontend
 ```
-
-🎯 背景问题
-
-在 NAS（ZOS 定制 Linux 系统）环境中，项目使用 HTTPS 方式访问 GitHub 时持续报错：
-
-gnutls_handshake() failed: Error in the pull function.
-
-
-排查结果：
-
-curl https://github.com 正常
-
-git fetch 失败
-
-Git 版本为 2.34.1
-
-NAS 用户环境存在异常（HOME 配置错误）
-
-同时发现：
-
-当前用户 $HOME 被错误设置为 /home/
-
-系统未为用户创建真实 home 目录
-
-SSH key 无法正常生成
-
-NAS 用户结构为定制环境，非标准 Linux 用户体系
-
-导致 Git HTTPS 认证方式不稳定。
-
-✅ 解决方案
-1️⃣ 放弃 HTTPS，改为 SSH 方式访问 GitHub
-
-原远程地址：
-
-https://github.com/Maotiannan/Inventory-Management-System.git
-
-
-修改为：
-
-git@github.com:Maotiannan/Inventory-Management-System.git
-
-
-此举直接绕过 TLS / GnuTLS 兼容问题。
-
-2️⃣ 使用 root 作为部署身份
-
-由于 NAS 普通用户 home 配置异常，决定采用更稳定的服务器部署方案：
-
-切换至 root 用户
-
-在 /root/.ssh/ 下生成 SSH key
-
-将公钥添加至 GitHub 账户
-
-生成命令：
-
-ssh-keygen -t ed25519 -C "znas-root"
-
-3️⃣ 验证 SSH 连接
-ssh -T git@github.com
-
-
-返回：
-
-Hi Maotiannan! You've successfully authenticated...
-
-
-说明认证成功。
-
-4️⃣ 成功拉取代码
-git fetch --all --prune
-
-
-仓库更新恢复正常。
-
-🧱 当前部署结构
-NAS (ZOS 系统)
- └── root 用户
-     └── /root/.ssh/id_ed25519
-         └── GitHub SSH 认证
-             └── 项目目录
-                 └── Docker 部署
-
-
-该结构优势：
-
-消除 HTTPS TLS 不稳定因素
-
-避开 NAS 用户 home 异常问题
-
-提供稳定的服务器级部署基础

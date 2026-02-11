@@ -161,8 +161,9 @@
           <n-h4>项目更新</n-h4>
           <n-space vertical>
             <n-text>当前分支: {{ updateStatus.current_branch || versionState.branch || "-" }}</n-text>
-            <n-text>当前版本: {{ updateStatus.current_commit || versionState.commit || versionState.short_commit || "-" }}</n-text>
-            <n-text>远端版本: {{ updateStatus.remote_commit || "-" }}</n-text>
+            <n-text>当前版本: {{ currentVersionLabel }}</n-text>
+            <n-text>远端版本: {{ remoteVersionLabel }}</n-text>
+            <n-text v-if="updateStatus.checked_at">检查时间: {{ updateStatus.checked_at }}</n-text>
             <n-text>状态: {{ updateStatus.message || "-" }}</n-text>
             <n-text v-if="versionState.message" depth="3">版本状态: {{ versionState.message }}</n-text>
           </n-space>
@@ -355,6 +356,30 @@ const rollbackRef = ref("");
 const newAccount = ref({ username: "", password: "" });
 
 const isAdmin = computed(() => authStore.user?.role === "admin");
+
+const currentVersionLabel = computed(() => {
+  const short = updateStatus.value.current_short || versionState.value.short_commit || "";
+  const time = updateStatus.value.current_time || "";
+  const subject = updateStatus.value.current_subject || "";
+  if (!short) return "-";
+  const parts = [short];
+  if (time) parts.push(time);
+  if (subject) parts.push(subject);
+  return parts.join("  ");
+});
+
+const remoteVersionLabel = computed(() => {
+  const short = updateStatus.value.remote_short || "";
+  const time = updateStatus.value.remote_time || "";
+  const subject = updateStatus.value.remote_subject || "";
+  if (!short && !updateStatus.value.remote_commit) return "-";
+  const display = short || (updateStatus.value.remote_commit || "").slice(0, 8);
+  if (!display) return "-";
+  const parts = [display];
+  if (time) parts.push(time);
+  if (subject) parts.push(subject);
+  return parts.join("  ");
+});
 const sectionOptions = [
   { label: "表格设置", value: "table" },
   { label: "账号配置", value: "account" },

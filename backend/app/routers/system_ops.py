@@ -245,6 +245,20 @@ def _ensure_git_safe_directory(repo_root: Path) -> None:
     _run_cmd(["git", "config", "--global", "--add", "safe.directory", str(repo_root)], timeout_sec=5)
 
 
+def _commit_info(repo_root: Path, ref: str) -> dict[str, str]:
+    """获取指定 commit 的短哈希和提交时间。"""
+    rc, out, _ = _run_cmd(
+        ["git", "-C", str(repo_root), "log", "-1", "--format=%h|%ai|%s", ref],
+        timeout_sec=8,
+    )
+    if rc != 0 or not out.strip():
+        return {"short": ref[:8] if ref else "", "time": "", "subject": ""}
+    parts = out.strip().split("|", 2)
+    if len(parts) < 3:
+        return {"short": ref[:8], "time": "", "subject": ""}
+    return {"short": parts[0], "time": parts[1], "subject": parts[2]}
+
+
 def _resolve_remote_commit(repo_root: Path, branch: str, timeout_sec: int = 20) -> tuple[str, str | None]:
     rc, out, err = _run_cmd(["git", "-C", str(repo_root), "rev-parse", f"origin/{branch}"], timeout_sec=8)
     if rc == 0 and out:
@@ -477,6 +491,8 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
             "message": f"Git status failed: {err1 or err2}",
         }
 
+    current_info = _commit_info(root, "HEAD")
+
     rc_fetch, _, err_fetch = _run_cmd(
         ["git", "-C", str(root), "fetch", "origin", branch],
         timeout_sec=35,
@@ -484,6 +500,7 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
     if rc_fetch != 0:
         remote_commit, resolve_err = _resolve_remote_commit(root, branch, timeout_sec=25)
         if remote_commit:
+            remote_info = _commit_info(root, remote_commit)
             has_update = current_commit != remote_commit
             return {
                 "enabled": True,
@@ -491,7 +508,13 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
                 "repo_url": config["repo_url"],
                 "current_branch": current_branch,
                 "current_commit": current_commit,
+                "current_short": current_info["short"],
+                "current_time": current_info["time"],
+                "current_subject": current_info["subject"],
                 "remote_commit": remote_commit,
+                "remote_short": remote_info["short"],
+                "remote_time": remote_info["time"],
+                "remote_subject": remote_info["subject"],
                 "has_update": has_update,
                 "message": f"Remote fetch failed, fallback to ls-remote: {err_fetch}",
             }
@@ -501,6 +524,8 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
             "repo_url": config["repo_url"],
             "current_branch": current_branch,
             "current_commit": current_commit,
+            "current_short": current_info["short"],
+            "current_time": current_info["time"],
             "remote_commit": "",
             "has_update": False,
             "message": f"Remote fetch failed: {err_fetch or resolve_err}",
@@ -513,9 +538,12 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
             "ok": False,
             "current_branch": current_branch,
             "current_commit": current_commit,
+            "current_short": current_info["short"],
+            "current_time": current_info["time"],
             "message": f"Remote status failed: {resolve_err}",
         }
 
+    remote_info = _commit_info(root, remote_commit)
     has_update = current_commit != remote_commit
     return {
         "enabled": True,
@@ -523,9 +551,16 @@ async def get_update_status(_: User = Depends(require_admin)) -> dict[str, Any]:
         "repo_url": config["repo_url"],
         "current_branch": current_branch,
         "current_commit": current_commit,
+        "current_short": current_info["short"],
+        "current_time": current_info["time"],
+        "current_subject": current_info["subject"],
         "remote_commit": remote_commit,
+        "remote_short": remote_info["short"],
+        "remote_time": remote_info["time"],
+        "remote_subject": remote_info["subject"],
         "has_update": has_update,
         "message": "有新版本" if has_update else "当前已是最新版本",
+        "checked_at": datetime.now(UTC).isoformat(),
     }
 
 
