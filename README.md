@@ -1,6 +1,6 @@
-# 进销存系统（ZNAS）
+# 进销存系统
 
-基于 `FastAPI + PostgreSQL + Vue3 + Naive UI + Docker Compose` 的 NAS 生产部署版进销存系统。
+基于 `FastAPI + PostgreSQL + Vue3 + Naive UI + Docker Compose` 的 NAS/MACMINI 生产部署版进销存系统。
 
 - 前端：`http://<NAS_IP>:<FRONTEND_PORT>`（默认 `8080`，可在 `.env` 中配置）
 - 后端：`http://<NAS_IP>:8000`
@@ -275,3 +275,4 @@ docker logs -f znas-backend
 # 前端日志
 docker logs -f znas-frontend
 ```
+
